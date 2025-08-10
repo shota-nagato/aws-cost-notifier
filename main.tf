@@ -81,3 +81,63 @@ resource "aws_lambda_function" "cost_notification" {
     }
   }
 }
+
+resource "aws_iam_role" "eventbridge_role" {
+  name = "eventbridge-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "eventbridge_lambda_policy" {
+  name = "eventbridge-lambda-policy"
+  role = aws_iam_role.eventbridge_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:InvokeFunction"
+        ]
+        Resource = aws_lambda_function.cost_notification.arn
+      }
+    ]
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "cost_notification_schedule" {
+  name        = "cost-notification-schedule"
+  description = "Daily cost notification schedule"
+
+  schedule_expression = "cron(0 0 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "cost_notification_target" {
+  rule      = aws_cloudwatch_event_rule.cost_notification_schedule.name
+  target_id = "CostNotificationTarget"
+  arn       = aws_lambda_function.cost_notification.arn
+
+  input = jsonencode({
+    function_type = "cost_notification"
+  })
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_cost_notification" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cost_notification.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.cost_notification_schedule.arn
+}
